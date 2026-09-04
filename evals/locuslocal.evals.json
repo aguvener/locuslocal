@@ -1,0 +1,317 @@
+[
+  {
+    "name": "Layer 1 \u2014 orient: what is loaded and what can I do?",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "What is loaded in this workbench right now?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "read_app_state",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Layer 1 \u2014 dataset summary",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Summarise the genetics file that is loaded."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "read_dataset_summary",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Layer 1 \u2014 active filters",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Which filters are applied to the table?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "read_active_filters",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Layer 1 \u2014 what is on screen right now",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "What rows can I currently see?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "read_visible_rows",
+        "arguments": {
+          "limit": 5
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 2 \u2014 filter to a gene (mutates the visible table)",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Show me only the BRCA2 variants."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "set_filter",
+        "arguments": {
+          "gene": "BRCA2"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 2 \u2014 sort by clinical significance",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Put the most serious findings at the top."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "set_sort",
+        "arguments": {
+          "key": "significance",
+          "direction": "asc"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 2 \u2014 clear the filter stack",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Clear all the filters and show everything again."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "clear_filters",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Layer 2 \u2014 filter by significance and review quality",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Only show pathogenic variants with at least two-star review."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "set_filter",
+        "arguments": {
+          "significance": ["pathogenic", "likely_pathogenic"],
+          "minStars": 2
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 2 \u2014 take the user's eye to one marker",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Point me at rs11537641."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "focus_row",
+        "arguments": {
+          "rsid": "rs11537641"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 4 \u2014 explain one variant from the local ClinVar join",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "What is rs11537641 and what is my genotype there?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "explain_variant",
+        "arguments": {
+          "rsid": "rs11537641"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 4 \u2014 explain a gene",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Tell me about my BRCA2 variants."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "explain_gene",
+        "arguments": {
+          "gene": "BRCA2"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 4 \u2014 triage the whole genome",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "What should I actually be looking at in this genome?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "explain_findings",
+        "arguments": {
+          "minStars": 2
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 4 \u2014 compare two groups",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "How do the BRCA1 variants compare with the BRCA2 ones?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "compare_groups",
+        "arguments": {
+          "groupA": "gene",
+          "geneA": "BRCA1",
+          "groupB": "gene",
+          "geneB": "BRCA2"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 4 \u2014 per-chromosome density",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Which chromosomes have the most flagged variants?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "explain_chromosome_map",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Robustness \u2014 out-of-range argument is clamped, not rejected",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Show findings with a review rating of at least 99 stars."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "explain_findings",
+        "arguments": {
+          "minStars": 99
+        }
+      }
+    ]
+  },
+  {
+    "name": "Robustness \u2014 unknown gene returns a useful answer, not an error",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Tell me about the NOTAREALGENE gene."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "explain_gene",
+        "arguments": {
+          "gene": "NOTAREALGENE"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Layer 1 \u2014 data quality and the annotation gate",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Is this file good enough to trust the findings?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "read_data_quality",
+        "arguments": {}
+      }
+    ]
+  },
+  {
+    "name": "Layer 5 \u2014 read the collaboration history back",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "What have you changed so far?"
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "read_tool_activity",
+        "arguments": {}
+      }
+    ]
+  }
+]

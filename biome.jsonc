@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "extends": ["ultracite/biome/core"],
+  "files": {
+    "includes": [
+      "!dist",
+      "!data-build",
+      "!public",
+      // Generated data modules: multi-megabyte single-string files.
+      "!src/data/clinvar.data.js",
+      "!src/data/demo.data.js"
+    ]
+  },
+  "linter": {
+    "rules": {
+      "style": {
+        // This codebase indexes typed arrays under `noUncheckedIndexedAccess`,
+        // which types every element access as `T | undefined`. The non-null
+        // assertion is the correct tool there, and the tsconfig flag is the
+        // stronger safety net — we keep the flag and drop the rule.
+        "noNonNullAssertion": "off",
+        // Hot loops walk ~900k markers. `i++` is the idiom; `i += 1` is noise.
+        "noIncrementDecrement": "off"
+      },
+      "suspicious": {
+        // Genotypes are bit-packed into a Uint16Array and the ClinVar lookup is
+        // a binary search using `>> 1`. Bitwise arithmetic is the point here.
+        "noBitwiseOperators": "off"
+      },
+      "performance": {
+        // Streaming file reads are sequential by nature: each chunk depends on
+        // the previous read resolving.
+        "noAwaitInLoops": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      // The variant table absolutely positions its rows so it can window a
+      // 250k-row view down to ~40 DOM nodes; a real <table> cannot do that.
+      // The full ARIA grid pattern (row / columnheader / gridcell /
+      // aria-rowcount / aria-rowindex / aria-selected) is applied instead,
+      // in src/ui/table.ts.
+      "includes": ["index.html"],
+      "linter": { "rules": { "a11y": { "useSemanticElements": "off" } } }
+    },
+    {
+      // Throwaway capability-probe code, kept in the repo as evidence of the
+      // Chrome 152 findings in docs/webmcp-probe-findings.md.
+      "includes": ["spike/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noExplicitAny": "off", "useAwait": "off" },
+          "style": { "noIncrementDecrement": "off" }
+        }
+      }
+    }
+  ]
+}

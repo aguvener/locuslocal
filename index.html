@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1" name="viewport">
+    <title>LocusLocal — variant triage that never leaves your tab</title>
+    <meta
+      content="A browser-local genomics workbench. Your genotype file is parsed, annotated and triaged entirely in this tab, and the page is served with a CSP that makes network egress impossible."
+      name="description"
+    >
+    <!--
+      The WebMCP origin trial <meta http-equiv="origin-trial"> tag is injected
+      at build time from VITE_ORIGIN_TRIAL_TOKEN (see .env.example and the
+      origin-trial-meta plugin in vite.config.ts). Register the deployed origin
+      at https://developer.chrome.com/blog/ai-webmcp-origin-trial
+    -->
+    <style>
+    /* Critical, inline on purpose. `src/styles.css` is imported by the entry
+         module, so in dev it cannot land in the first paint, and in production
+         it is one network round trip away. Everything here covers the gap: the
+         rule is that nothing may be invisible, small or off-screen *only*
+         because the main stylesheet says so. Get that wrong and the first paint
+         is a full-screen Octocat over a bare page, which is exactly what it
+         was. */
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      color: #e9ecf1;
+      background: #07080a;
+    }
+    [hidden] {
+      display: none !important;
+    }
+    /* An inline SVG carrying only a viewBox has no intrinsic size, so until a
+         stylesheet gives it one the browser uses the replaced-element default
+         of 300x150. The markup now sets width/height attributes as well; this
+         is the belt to that pair of braces. */
+    .brand .mark svg,
+    .github-icon,
+    .agent-icon {
+      display: block;
+      width: 19px;
+      height: 19px;
+    }
+    /* Overlays and off-screen affordances, each of which is a full-page or
+         mid-page block of content until the rule that hides it arrives. Each
+         one is hidden the same way `src/styles.css` hides it, so the real rule
+         can still reveal it — hiding the citation with `display` here would
+         leave nothing for `:hover` to turn back on. */
+    .dropzone {
+      display: none;
+    }
+    .cite-pop {
+      visibility: hidden;
+    }
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+    }
+    /* The header and landing links are underlined UA blue without this, which
+         reads as a broken page rather than a loading one. */
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+    /* Just enough of the shell that the first paint is the app's shape rather
+         than a stack of left-aligned blocks that then jumps. Structure only —
+         every one of these properties is redeclared in `src/styles.css`, so
+         nothing here can survive into the styled page and drift. */
+    .app {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      height: 100dvh;
+    }
+    .statusbar {
+      display: flex;
+      align-items: center;
+      height: 54px;
+      padding: 0 10px 0 13px;
+    }
+    .empty-state {
+      display: grid;
+      place-items: center;
+      padding: 30px;
+    }
+    .empty-card {
+      max-width: 470px;
+      text-align: center;
+    }
+    </style>
+    <link
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2307080a'/%3E%3Cpath d='M10 7c0 6 12 6 12 12M22 7c0 6-12 6-12 12M10 25c0-2.2 12-2.2 12 0' stroke='%23bce62f' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"
+      rel="icon"
+    >
+  </head>
+  <body>
+    <a class="skip-link" href="#centre">Skip to the workbench</a>
+
+    <!--
+      One polite live region for the whole app. Every mutation lands here in a
+      sentence, whoever made it, because an agent changing the table under a
+      screen-reader user is otherwise completely silent.
+    -->
+    <div
+      aria-live="polite"
+      class="sr-only"
+      id="live-region"
+      role="status"
+    ></div>
+
+    <div class="app">
+      <header class="statusbar">
+        <a class="brand" href="/" id="brand-home" title="Back to the workbench">
+          <span aria-hidden="true" class="mark">
+            <svg fill="none" height="19" viewBox="0 0 32 32" width="19">
+              <title>LocusLocal</title>
+              <rect fill="#07080a" height="32" rx="7" width="32"></rect>
+              <path
+                d="M10 7c0 6 12 6 12 12M22 7c0 6-12 6-12 12M10 25c0-2.2 12-2.2 12 0"
+                stroke="#bce62f"
+                stroke-linecap="round"
+                stroke-width="2.4"
+              ></path>
+            </svg>
+          </span>
+          <span class="brand-name">LocusLocal</span>
+        </a>
+
+        <div class="bar-group bar-modes" hidden id="modebar">
+          <div aria-label="View mode" class="segmented" role="tablist">
+            <button
+              aria-selected="true"
+              class="seg is-on"
+              id="btn-mode-guided"
+              role="tab"
+              title="A plain-language summary of what is in your file"
+              type="button"
+            >
+              Guided
+            </button>
+            <button
+              aria-selected="false"
+              class="seg"
+              id="btn-mode-advanced"
+              role="tab"
+              title="The full variant table, filters and sorting"
+              type="button"
+            >
+              Advanced
+            </button>
+          </div>
+        </div>
+
+        <span class="bar-spacer"></span>
+
+        <div class="bar-group" hidden id="bar-panels">
+          <button
+            aria-controls="rail-left"
+            aria-expanded="false"
+            class="btn btn-sm"
+            id="btn-panels"
+            title="Filters, shortlist and what to do next"
+            type="button"
+          >
+            Panels
+          </button>
+        </div>
+
+        <div class="bar-group" hidden id="bar-session">
+          <button
+            class="btn btn-sm"
+            id="btn-open-another"
+            title="Read a different genotype file into this tab"
+            type="button"
+          >
+            Open file…
+          </button>
+          <button
+            class="btn btn-sm"
+            id="btn-close-file"
+            title="Drop the genotypes from memory, keeping the saved session on this device"
+            type="button"
+          >
+            Close file
+          </button>
+          <button
+            class="btn btn-sm btn-danger"
+            id="btn-wipe"
+            title="Erase the parsed genome, filters, shortlist and notes from this browser"
+            type="button"
+          >
+            Delete local data
+          </button>
+        </div>
+
+        <div class="bar-group" id="bar-about">
+          <a
+            aria-label="Source on GitHub"
+            class="github-link"
+            href="https://github.com/aguvener/locuslocal"
+            rel="noopener"
+            target="_blank"
+            title="Source on GitHub"
+          >
+            <svg
+              aria-hidden="true"
+              class="github-icon"
+              height="21"
+              viewBox="0 0 16 16"
+              width="21"
+            >
+              <path
+                d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.34c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.19c0 .21.14.46.55.38A8 8 0 0 0 8 0Z"
+                fill="currentColor"
+              ></path>
+            </svg>
+          </a>
+        </div>
+
+        <div class="bar-group" hidden id="bar-agent">
+          <button
+            aria-controls="rail-right"
+            aria-expanded="false"
+            aria-label="Toggle agent panel"
+            class="agent-toggle btn btn-sm"
+            id="btn-toggle-rail"
+            title="Show or hide the agent panel"
+            type="button"
+          >
+            <svg
+              aria-hidden="true"
+              class="agent-icon"
+              fill="none"
+              height="18"
+              viewBox="0 0 24 24"
+              width="18"
+            >
+              <rect
+                height="11"
+                rx="3"
+                stroke="currentColor"
+                width="16"
+                x="4"
+                y="8"
+              ></rect>
+              <path
+                d="M12 8V5M9 5h6M8.5 12h.01M15.5 12h.01M9 15.5h6"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-width="1.5"
+              ></path>
+            </svg>
+          </button>
+        </div>
+
+        <div class="bar-group" hidden id="bar-history">
+          <button
+            aria-label="Keyboard shortcuts"
+            class="btn btn-ghost btn-sm btn-keys"
+            id="btn-shortcuts"
+            title="Keyboard shortcuts (?)"
+            type="button"
+          >
+            ?
+          </button>
+          <button
+            class="btn btn-ghost btn-sm"
+            disabled
+            id="btn-undo"
+            title="Undo (Cmd/Ctrl+Z)"
+            type="button"
+          >
+            Undo
+          </button>
+          <button
+            class="btn btn-ghost btn-sm"
+            disabled
+            id="btn-redo"
+            title="Redo (Cmd/Ctrl+Shift+Z)"
+            type="button"
+          >
+            Redo
+          </button>
+        </div>
+      </header>
+
+      <div class="banners" id="banners"></div>
+
+      <article class="about" hidden id="about-view">
+        <div class="about-inner">
+          <h1>Your genome never leaves the tab it is read in.</h1>
+
+          <p class="about-lede">
+            LocusLocal is a variant-triage workbench for data too sensitive to
+            upload. You drop a VCF or a 23andMe / AncestryDNA raw export onto
+            the page; it is parsed, annotated against a bundled ClinVar subset
+            and triaged entirely inside one browser tab. Then an AI agent can
+            analyse it with you — without the file ever being transmitted
+            anywhere.
+          </p>
+
+          <h2>The problem</h2>
+          <p>
+            Tens of millions of people are sitting on a consumer-genomics raw
+            export they will not upload to a third-party interpretation site. So
+            the file just sits there: simultaneously the most personal data they
+            own and completely unreadable to them. The obstacle is not analysis.
+            The obstacle is that every tool capable of doing the analysis asks
+            for the file first.
+          </p>
+
+          <h2>Why it cannot upload your file</h2>
+          <p>
+            This is not a promise, it is a property the browser enforces. The
+            page is served with
+            <code>Content-Security-Policy: connect-src 'none'</code>
+            and
+            <code>form-action 'none'</code>, which makes
+            <code>fetch</code>, <code>XMLHttpRequest</code>,
+            <code>WebSocket</code>, <code>EventSource</code>,
+            <code>sendBeacon</code>
+            and form submission structurally unavailable to every line of code
+            on the page — ours included. There is no code path that can open a
+            data connection, so there is nothing to audit for good behaviour.
+          </p>
+          <p>
+            The data the app itself needs — the ClinVar subset and the demo
+            genome — is shipped as lazily imported script chunks, which the
+            browser governs under <code>script-src</code> rather than
+            <code>connect-src</code>. The fonts are self-hosted for the same
+            reason: a product whose entire claim is that data never leaves the
+            tab must not open a connection to a font CDN to draw its own
+            interface. A monitor instruments every outbound API and stays silent
+            at zero; if one byte is ever attempted, it takes the full width of
+            the screen and says so.
+          </p>
+
+          <h2>What the agent can and cannot do</h2>
+          <p>
+            The genome is inaccessible to the agent except through WebMCP tools
+            this page registers. Those tools are read-only by default; every
+            tool with a side effect renders a confirmation card in the page and
+            waits. The agent can propose. Only a human can commit — and a
+            refusal is recorded, so the agent can read back that it asked and
+            was told no rather than asking again.
+          </p>
+          <p>
+            Every change an agent makes goes through the same code as a mouse
+            click, lands in the same undo stack, and briefly outlines the panel
+            it touched. Nothing a tool can do is unavailable by hand: the same
+            filters, the same explanations, the same shortlist edits. The
+            analysis lives in one module that both the guided screen and the
+            agent's tools call, so the human and the model are always reading
+            one analysis rather than two implementations of it.
+          </p>
+
+          <h2>What it is not</h2>
+          <p>
+            <strong>This is not a diagnosis and not medical advice.</strong>
+            ClinVar classifications describe variants, not people, and a
+            consumer genotype file is not a diagnostic test. A genotyping chip
+            reads a small, fixed slice of the genome: a variant absent from your
+            file has not been ruled out, it was never looked for. An empty
+            findings list is the common result and it is not a clean bill of
+            health. Take anything that worries you to a clinician or a genetic
+            counsellor.
+          </p>
+
+          <h2>Where the data comes from</h2>
+          <p>
+            Nothing shipped here is synthetic. The demo genome is sample
+            <strong>NA12878</strong>
+            from the
+            <a
+              href="https://www.internationalgenome.org/"
+              rel="noopener"
+              target="_blank"
+              >1000 Genomes Project</a
+            >
+            on an Affymetrix 6.0 genotype chip — real, public, open-consent
+            human genotypes. Annotations come from
+            <a
+              href="https://www.ncbi.nlm.nih.gov/clinvar/"
+              rel="noopener"
+              target="_blank"
+              >NCBI ClinVar</a
+            >
+            (GRCh37), a public-domain U.S. Government work. The build is not
+            assumed: it is detected and scored, and a file that cannot be safely
+            joined against a GRCh37 subset is browsable but carries no clinical
+            classifications at all, with the reason stated on screen.
+          </p>
+
+          <h2>Where your session is kept</h2>
+          <p>
+            The parsed genome, your filters, your shortlist and your notes are
+            written to IndexedDB on this device so you can pick the work up
+            again. That copy never leaves the machine, restoring it is always
+            offered rather than automatic — silently reopening somebody's genome
+            on a shared computer would be a privacy failure dressed up as a
+            convenience — and one button in the header erases all of it.
+          </p>
+
+          <p class="about-foot">
+            Built for the
+            <a href="https://webmcp.devpost.com/" rel="noopener" target="_blank"
+              >WebMCP Challenge</a
+            >. Source on
+            <a
+              href="https://github.com/aguvener/locuslocal"
+              rel="noopener"
+              target="_blank"
+              >GitHub</a
+            >.
+          </p>
+
+          <a class="btn btn-primary" href="/" id="link-home">
+            Open the workbench
+          </a>
+        </div>
+      </article>
+
+      <div class="grid rail-r-collapsed" id="grid">
+        <aside class="rail rail-left" hidden id="rail-left">
+          <div class="rail-scroll">
+            <section class="panel" id="panel-dataset">
+              <div class="panel-head">
+                Dataset <span class="count" id="dataset-count"></span>
+              </div>
+              <div class="panel-body" id="dataset-body"></div>
+            </section>
+            <section class="panel" hidden id="panel-filters">
+              <div class="panel-head">
+                Filters <span class="count" id="filters-count"></span>
+              </div>
+              <div class="panel-body" id="filters-body"></div>
+            </section>
+            <section class="panel" hidden id="panel-chrom">
+              <div class="panel-head">Chromosome map</div>
+              <div class="panel-body" id="chrom-body"></div>
+            </section>
+            <section class="panel" id="panel-shortlist">
+              <div class="panel-head">
+                Shortlist <span class="count" id="shortlist-count"></span>
+              </div>
+              <div class="panel-body" id="shortlist-body"></div>
+            </section>
+          </div>
+          <section class="panel panel-next" hidden id="panel-next">
+            <div class="panel-head">What to do next</div>
+            <div class="panel-body" id="next-body"></div>
+          </section>
+        </aside>
+
+        <section class="centre" id="centre" tabindex="-1">
+          <div class="overview" hidden id="overview"></div>
+
+          <div class="tablebar" hidden id="tablebar">
+            <span class="title">Variants</span>
+            <span class="sep"></span>
+            <label class="search">
+              <span aria-hidden="true" style="color: var(--text-dim)">⌕</span>
+              <input
+                aria-label="Search variants"
+                id="search-input"
+                placeholder="rsid, gene or condition…"
+                type="search"
+              >
+            </label>
+            <span class="spacer"></span>
+            <span class="title" id="selection-readout"></span>
+            <button
+              class="btn btn-sm"
+              hidden
+              id="btn-shortlist-selected"
+              type="button"
+            >
+              Shortlist selection
+            </button>
+            <button
+              class="btn btn-sm"
+              hidden
+              id="btn-clear-selection"
+              type="button"
+            >
+              Clear selection
+            </button>
+          </div>
+
+          <div class="table-wrap" hidden id="table-wrap">
+            <div class="thead" id="thead"></div>
+            <div
+              aria-label="Variant table"
+              class="tbody"
+              id="tbody"
+              role="grid"
+              tabindex="0"
+            >
+              <div class="tbody-inner" id="tbody-inner" role="rowgroup"></div>
+            </div>
+            <div aria-hidden="true" class="table-scroll" id="table-scroll">
+              <i id="table-scroll-thumb"></i>
+            </div>
+            <div class="table-foot">
+              <span id="foot-count"></span>
+              <span class="foot-range" id="foot-range"></span>
+              <span class="spacer"></span>
+              <span class="hint">
+                <kbd>↑</kbd><kbd>↓</kbd>
+                move · <kbd>?</kbd> all keys
+              </span>
+            </div>
+          </div>
+
+          <div class="empty-state" id="empty-state">
+            <div class="empty-card">
+              <h1>Your genome never leaves <em>this tab</em>.</h1>
+              <p>
+                Drop a VCF or a 23andMe / AncestryDNA raw export anywhere on
+                this page. It is parsed, annotated against a bundled ClinVar
+                subset and triaged entirely in your browser — then an AI agent
+                can analyse it through WebMCP tools without the file ever being
+                uploaded.
+              </p>
+              <div class="empty-actions">
+                <span class="cite-wrap">
+                  <button
+                    aria-describedby="demo-citation"
+                    class="btn btn-primary"
+                    id="btn-load-demo"
+                    type="button"
+                  >
+                    Load demo genome
+                  </button>
+                  <span class="cite-pop" id="demo-citation" role="tooltip">
+                    1000 Genomes Project, Affymetrix 6.0 chip, sample NA12878 —
+                    real, public, open-consent human genotypes. Annotations:
+                    NCBI ClinVar (GRCh37), public domain. Nothing here is
+                    synthetic.
+                  </span>
+                </span>
+                <button class="btn" id="btn-pick-file" type="button">
+                  Choose a file…
+                </button>
+              </div>
+              <a class="landing-about" href="/about" id="link-about">
+                <span>About LocusLocal</span>
+              </a>
+              <div class="progress" hidden id="load-progress">
+                <i style="width: 0%"></i>
+              </div>
+              <div class="resume-card" hidden id="resume-card"></div>
+              <p class="empty-meta" id="empty-meta"></p>
+            </div>
+            <p class="landing-tag">variant triage, in your tab</p>
+            <aside
+              aria-labelledby="webmcp-alert-title"
+              class="webmcp-alert"
+              hidden
+              id="webmcp-alert"
+              role="status"
+            >
+              <span aria-hidden="true" class="webmcp-alert-mark"></span>
+              <div class="webmcp-alert-copy">
+                <p class="webmcp-alert-kicker">Agent connection</p>
+                <h2 id="webmcp-alert-title">WebMCP is not available</h2>
+                <p>
+                  Everything still works as a manual analysis tool. An agent
+                  just cannot drive it.
+                </p>
+                <p class="webmcp-alert-help">
+                  Enable
+                  <code>chrome://flags/#enable-webmcp-testing</code>
+                  in Chrome 146+, or open this page in the ChatGPT desktop app.
+                </p>
+              </div>
+              <button
+                aria-label="Dismiss WebMCP notice"
+                class="webmcp-alert-close"
+                id="btn-dismiss-webmcp-alert"
+                title="Dismiss"
+                type="button"
+              >
+                ✕
+              </button>
+            </aside>
+          </div>
+        </section>
+
+        <aside class="rail rail-right" hidden id="rail-right">
+          <div class="rail-head">
+            <span class="rail-head-title">Agent</span>
+            <button
+              aria-controls="rail-inner"
+              aria-expanded="true"
+              class="rail-toggle"
+              id="btn-collapse-rail"
+              title="Hide the agent panel"
+              type="button"
+            >
+              <span aria-hidden="true" class="rail-toggle-icon">›</span>
+              <span class="sr-only">Hide the agent panel</span>
+            </button>
+          </div>
+          <div class="rail-inner" id="rail-inner">
+            <section class="panel" id="panel-surface">
+              <div class="panel-head">
+                Tool surface <span class="count" id="surface-count"></span>
+              </div>
+              <div class="panel-body">
+                <div class="tool-surface" id="surface-body"></div>
+              </div>
+            </section>
+            <section class="panel panel-activity">
+              <div class="panel-head">
+                Tool activity
+                <span class="count" id="activity-count"></span>
+                <button
+                  class="btn btn-sm btn-ghost"
+                  id="btn-clear-activity"
+                  type="button"
+                >
+                  clear
+                </button>
+              </div>
+              <div class="activity-list" id="activity-body"></div>
+            </section>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <aside
+      aria-labelledby="suggested-prompt-title"
+      class="suggested-prompt"
+      hidden
+      id="suggested-prompt"
+    >
+      <div class="suggested-prompt-head">
+        <div>
+          <h2 id="suggested-prompt-title">Suggested prompt</h2>
+          <p>Try this with your browser agent</p>
+        </div>
+        <button
+          aria-label="Dismiss the suggested prompt"
+          class="suggested-prompt-close"
+          id="btn-dismiss-suggested-prompt"
+          title="Dismiss"
+          type="button"
+        >
+          ✕
+        </button>
+      </div>
+      <p class="suggested-prompt-text" id="suggested-prompt-text"></p>
+      <div class="suggested-prompt-foot">
+        <span>Uses only the file open in this tab.</span>
+        <button
+          class="btn btn-primary"
+          id="btn-copy-suggested-prompt"
+          type="button"
+        >
+          Copy prompt
+        </button>
+      </div>
+    </aside>
+
+    <aside aria-labelledby="drawer-title" class="drawer" hidden id="drawer">
+      <div class="drawer-head">
+        <span class="drawer-kicker">What this variant means</span>
+        <h2 class="drawer-title" id="drawer-title">
+          <span id="drawer-title-text">Variant details</span>
+        </h2>
+        <button
+          aria-label="Close details"
+          class="drawer-close"
+          id="btn-close-drawer"
+          type="button"
+        >
+          ✕
+        </button>
+      </div>
+      <div class="drawer-body" id="drawer-body"></div>
+    </aside>
+
+    <!--
+      Every mouse gesture the workbench offers has a key, and until now the
+      only place that said so was one hint strip under the table. `?` opens
+      this; it is the same list the footer hint points at.
+    -->
+    <div class="shortcuts-layer" hidden id="shortcuts-layer">
+      <div
+        aria-labelledby="shortcuts-title"
+        aria-modal="true"
+        class="shortcuts"
+        role="dialog"
+      >
+        <div class="shortcuts-head">
+          <div>
+            <span class="shortcuts-kicker">Keyboard</span>
+            <h2 id="shortcuts-title">Everything without the mouse</h2>
+          </div>
+          <button
+            aria-label="Close the keyboard shortcuts"
+            class="shortcuts-close"
+            id="btn-close-shortcuts"
+            type="button"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="shortcuts-body">
+          <section>
+            <h3>In the variant table</h3>
+            <dl>
+              <dt><kbd>↑</kbd> <kbd>↓</kbd></dt>
+              <dd>Move the cursor one row</dd>
+              <dt><kbd>⇧</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
+              <dd>Extend the selection</dd>
+              <dt><kbd>page up</kbd> <kbd>page down</kbd></dt>
+              <dd>Move a screenful</dd>
+              <dt><kbd>home</kbd> <kbd>end</kbd></dt>
+              <dd>First or last row in the view</dd>
+              <dt><kbd>space</kbd></dt>
+              <dd>Add or remove this row from the selection</dd>
+              <dt><kbd>enter</kbd></dt>
+              <dd>Open what this variant means</dd>
+            </dl>
+          </section>
+          <section>
+            <h3>Anywhere</h3>
+            <dl>
+              <dt><kbd>/</kbd> or <kbd>⌘</kbd><kbd>K</kbd></dt>
+              <dd>Jump to the search box</dd>
+              <dt><kbd>S</kbd></dt>
+              <dd>Shortlist the current selection</dd>
+              <dt><kbd>G</kbd></dt>
+              <dd>Switch between guided and advanced</dd>
+              <dt><kbd>⌘</kbd><kbd>Z</kbd></dt>
+              <dd>Undo — agent changes included</dd>
+              <dt><kbd>⇧</kbd><kbd>⌘</kbd><kbd>Z</kbd></dt>
+              <dd>Redo</dd>
+              <dt><kbd>esc</kbd></dt>
+              <dd>Close details, then clear the selection</dd>
+              <dt><kbd>?</kbd></dt>
+              <dd>This list</dd>
+            </dl>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div class="dropzone" id="dropzone">
+      <div class="dropzone-inner">
+        <h2>Drop it here</h2>
+        <p>The file is read in this tab. Nothing is uploaded.</p>
+      </div>
+    </div>
+
+    <input accept=".vcf,.txt,.tsv,.csv" hidden id="file-input" type="file">
+    <div id="confirm-root"></div>
+
+    <script src="/src/main.ts" type="module"></script>
+  </body>
+</html>

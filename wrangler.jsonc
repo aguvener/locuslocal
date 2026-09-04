@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "locuslocal",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-02",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Static assets are normally served before the Worker script ever runs,
+    // which would skip our security headers entirely. The whole point of this
+    // Worker is those headers, so it has to run first on every request.
+    "run_worker_first": true
+  },
+  "observability": { "enabled": true }
+}

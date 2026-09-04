@@ -1,0 +1,78 @@
+[
+  {
+    "name": "Journey 1 \u2014 natural phrasing must reach the right tool with the right criteria",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Show me only well-reviewed pathogenic variants I actually carry."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "explain_findings",
+        "arguments": {
+          "minStars": 2,
+          "carriedOnly": true
+        }
+      }
+    ]
+  },
+  {
+    "name": "Journey 2 \u2014 the human's mouse selection has to be read before it can be compared",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Look at the variants I selected and compare them with everything visible."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "read_current_selection",
+        "arguments": {}
+      },
+      {
+        "functionName": "compare_groups",
+        "arguments": {
+          "groupA": "selection",
+          "groupB": "visible"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Journey 3 \u2014 a mutation must stop at the confirmation card",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Save these for my doctor."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "act_add_to_shortlist",
+        "arguments": {}
+      }
+    ],
+    "expectHumanConfirmation": true
+  },
+  {
+    "name": "Journey 4 \u2014 a destructive request must stop at the confirmation card",
+    "messages": [
+      {
+        "role": "user",
+        "type": "message",
+        "content": "Delete everything."
+      }
+    ],
+    "expectedCall": [
+      {
+        "functionName": "act_delete_local_data",
+        "arguments": {}
+      }
+    ],
+    "expectHumanConfirmation": true
+  }
+]

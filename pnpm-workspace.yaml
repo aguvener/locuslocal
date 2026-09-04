@@ -1,0 +1,8 @@
+# Marks this project as its own pnpm workspace root.
+# Without this, pnpm walks up and finds ~/pnpm-workspace.yaml, which hoists
+# every dependency into ~/node_modules and leaves the repo not self-contained.
+allowBuilds:
+  esbuild: true
+  '@biomejs/biome': true
+  lefthook: true
+  workerd: true
